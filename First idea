@@ -1,0 +1,443 @@
+import abc
+from dependency_injector import containers, providers
+import cryptography.fernet
+import pandas as pd
+import argparse
+from typing import Protocol, runtime_checkable
+from PyQt5 import QtWidgets, QtCore
+import svgwrite
+import pyarrow.parquet as pq
+import aiohttp
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+# --------------------------
+# Service Layer Abstractions
+# --------------------------
+@runtime_checkable
+class IScanner(Protocol):
+    @abc.abstractmethod
+    def scan(self) -> dict:
+        pass
+
+@runtime_checkable
+class ITunnel(Protocol):
+    @abc.abstractmethod
+    def send(self, data: bytes) -> bool:
+        pass
+
+    @abc.abstractmethod
+    def receive(self) -> bytes:
+        pass
+
+class WiFiScanner(IScanner):
+    def scan(self) -> dict:
+        """Concrete WiFi scanner implementation"""
+        # Existing scanning logic
+        return {}
+
+class BLEScanner(IScanner):
+    def scan(self) -> dict:
+        """Concrete BLE scanner implementation"""
+        # Existing BLE scanning logic
+        return {}
+
+class WireGuardTunnel(ITunnel):
+    def __init__(self, private_key: str):
+        self.private_key = private_key
+
+    def send(self, data: bytes) -> bool:
+        """Concrete WireGuard implementation"""
+        # Existing WireGuard logic
+        return True
+
+    def receive(self) -> bytes:
+        """Concrete WireGuard implementation"""
+        # Existing WireGuard logic
+        return b""
+
+# --------------------------
+# Dependency Injection Container
+# --------------------------
+class Container(containers.DeclarativeContainer):
+    config = providers.Configuration()
+    
+    # Security components
+    tunnel = providers.Singleton(
+        WireGuardTunnel,
+        private_key=config.security.private_key
+    )
+    
+    # Scanner components
+    wifi_scanner = providers.Factory(
+        WiFiScanner
+    )
+    
+    ble_scanner = providers.Factory(
+        BLEScanner
+    )
+    
+    # AI components
+    anomaly_detector = providers.Singleton(
+        AnomalyDetector,
+        threshold=config.ai.anomaly_threshold
+    )
+
+# --------------------------
+# Enhanced Security & Logging
+# --------------------------
+class EncryptedAuditLogger:
+    def __init__(self, encryption_key: str):
+        self.fernet = cryptography.fernet.Fernet(encryption_key)
+        self.rate_limiter = RateLimiter(limit=10, window=60)  # 10 logs/minute
+    
+    def log(self, message: str):
+        if self.rate_limiter.check():
+            encrypted = self.fernet.encrypt(message.encode())
+            # Write to log file
+            with open("audit.log", "ab") as f:
+                f.write(encrypted + b"\n")
+
+class TPMManager:
+    def __init__(self):
+        self.tpm_available = self._check_tpm()
+        
+    def _check_tpm(self) -> bool:
+        try:
+            import tpm2_pytss
+            return True
+        except ImportError:
+            return False
+    
+    def get_key(self) -> bytes:
+        if self.tpm_available:
+            try:
+                tpm = tpm2_pytss.TCTI()
+                return tpm.create_primary_key()
+            except Exception as e:
+                print(f"TPM unavailable, falling back to software: {str(e)}")
+        
+        # Fallback to software key
+        from cryptography.hazmat.primitives.asymmetric import ec
+        private_key = ec.generate_private_key(ec.SECP256R1())
+        return private_key.private_bytes(
+            encoding=Encoding.PEM,
+            format=PrivateFormat.PKCS8,
+            encryption_algorithm=NoEncryption()
+        )
+
+# --------------------------
+# Enhanced AI & Behavior Learning
+# --------------------------
+class AnomalyDetector:
+    def __init__(self, threshold: float = 0.7):
+        self.threshold = threshold
+        self.model = anomaly.HalfSpaceTrees()
+        self.feedback_stats = {"true_positives": 0, "false_positives": 0}
+    
+    def is_anomalous(self, device_mac: str, features: dict) -> bool:
+        score = self.model.predict_score(features)
+        return score > self._get_dynamic_threshold()
+    
+    def _get_dynamic_threshold(self) -> float:
+        """Adjust threshold based on feedback"""
+        total = sum(self.feedback_stats.values())
+        if total == 0:
+            return self.threshold
+        
+        false_positive_rate = self.feedback_stats["false_positives"] / total
+        if false_positive_rate > 0.3:  # Too many false positives
+            return self.threshold * 1.1  # Increase threshold
+        elif false_positive_rate < 0.1:  # Very few false positives
+            return self.threshold * 0.9  # Decrease threshold
+        return self.threshold
+
+class DeviceRoleClassifier:
+    def __init__(self):
+        self.model = DBSCAN(eps=0.5, min_samples=2)
+        self.role_mapping = {
+            0: "mobile",
+            1: "router",
+            2: "iot",
+            3: "laptop"
+        }
+    
+    def classify(self, features: dict) -> str:
+        X = self._prepare_features(features)
+        cluster = self.model.fit_predict([X])[0]
+        return self.role_mapping.get(cluster, "unknown")
+    
+    def _prepare_features(self, features: dict) -> list:
+        return [
+            features["avg_speed"],
+            features["rssi_mean"],
+            features["packet_frequency"]
+        ]
+
+# --------------------------
+# Hardware and Efficiency Improvements
+# --------------------------
+class ChannelOptimizer:
+    def __init__(self, channels: list):
+        self.channels = channels
+        self.congestion = {ch: 0 for ch in channels}
+    
+    def select_channel(self) -> int:
+        """Select least congested channel"""
+        return min(self.congestion.items(), key=lambda x: x[1])[0]
+    
+    def update_congestion(self, scan_results: dict):
+        """Update congestion metrics"""
+        for ch, rssi in scan_results.items():
+            self.congestion[ch] = 0.7 * self.congestion[ch] + 0.3 * rssi
+
+class EnergyMonitor:
+    def __init__(self, cpu_threshold: float = 80.0, ram_threshold: float = 90.0):
+        self.cpu_threshold = cpu_threshold
+        self.ram_threshold = ram_threshold
+    
+    def should_skip_scan(self) -> bool:
+        """Check if system resources are overloaded"""
+        cpu = psutil.cpu_percent()
+        ram = psutil.virtual_memory().percent
+        return cpu > self.cpu_threshold or ram > self.ram_threshold
+
+class LowPowerMode:
+    def __init__(self, enabled: bool = False):
+        self.enabled = enabled
+        self.base_interval = 1.0
+        self.current_interval = self.base_interval
+    
+    def get_scan_interval(self) -> float:
+        """Get current scan interval based on power mode"""
+        return self.current_interval * (5.0 if self.enabled else 1.0)
+    
+    def enable(self):
+        self.enabled = True
+    
+    def disable(self):
+        self.enabled = False
+
+# --------------------------
+# Enhanced Visualization & UX
+# --------------------------
+class UIManager:
+    def __init__(self):
+        self.plot_widget = pg.PlotWidget()
+        self.timeline = QtWidgets.QTimeLine()
+        self.cluster_highlights = {}
+        
+        # Setup timeline
+        self.timeline.setFrameRange(0, 100)
+        self.timeline.valueChanged.connect(self._on_timeline_change)
+    
+    def add_device(self, x: float, y: float, device_type: str, cluster: int = -1):
+        """Add device to visualization with cluster highlighting"""
+        icon = self._get_icon(device_type)
+        item = self.plot_widget.plot([x], [y], symbol=icon)
+        
+        if cluster != -1:
+            color = self._get_cluster_color(cluster)
+            highlight = pg.EllipseROI([x-0.2, y-0.2], [0.4, 0.4], pen=color)
+            self.cluster_highlights[id(item)] = highlight
+            self.plot_widget.addItem(highlight)
+    
+    def _get_icon(self, device_type: str) -> str:
+        """Get SVG icon for device type"""
+        icons = {
+            "mobile": "phone.svg",
+            "laptop": "laptop.svg",
+            "router": "router.svg",
+            "iot": "iot.svg"
+        }
+        return icons.get(device_type, "unknown.svg")
+    
+    def _get_cluster_color(self, cluster_id: int) -> pg.mkPen:
+        """Get color for cluster"""
+        colors = [
+            (255, 0, 0), (0, 255, 0), (0, 0, 255),
+            (255, 255, 0), (255, 0, 255), (0, 255, 255)
+        ]
+        return pg.mkPen(colors[cluster_id % len(colors)], width=2)
+
+# --------------------------
+# Enhanced Messaging & WebSockets
+# --------------------------
+class WebSocketManager:
+    def __init__(self):
+        self.socketio = None
+        self.executor = ThreadPoolExecutor(max_workers=1)
+    
+    def start_server(self):
+        """Start WebSocket server in background thread"""
+        self.executor.submit(self._run_server)
+    
+    def _run_server(self):
+        """Actual server run in separate thread"""
+        app = Flask(__name__)
+        socketio = SocketIO(app, async_mode='threading')
+        
+        @socketio.on('connect')
+        def handle_connect():
+            print("Client connected")
+        
+        self.socketio = socketio
+        socketio.run(app)
+
+class ProtobufValidator:
+    @staticmethod
+    def validate(message: protobuf_message.Message) -> bool:
+        """Validate protobuf message against schema"""
+        try:
+            message.SerializeToString()
+            return True
+        except Exception as e:
+            print(f"Protobuf validation failed: {str(e)}")
+            return False
+
+class CommandProtocol:
+    def __init__(self):
+        self.commands = {
+            "scan": self._handle_scan,
+            "config": self._handle_config
+        }
+    
+    def execute(self, command: str, args: dict) -> dict:
+        """Execute command with arguments"""
+        handler = self.commands.get(command)
+        if not handler:
+            return {"error": "Unknown command"}
+        return handler(args)
+    
+    def _handle_scan(self, args: dict) -> dict:
+        """Handle scan command"""
+        return {"status": "scanning"}
+    
+    def _handle_config(self, args: dict) -> dict:
+        """Handle config command"""
+        return {"status": "config updated"}
+
+# --------------------------
+# Enhanced Data Persistence
+# --------------------------
+class ParquetStorage:
+    @staticmethod
+    def save_snapshot(data: dict, filename: str):
+        """Save snapshot in Parquet format"""
+        df = pd.DataFrame(data)
+        df.to_parquet(filename, compression='gzip')
+    
+    @staticmethod
+    def load_snapshot(filename: str) -> dict:
+        """Load snapshot from Parquet file"""
+        df = pd.read_parquet(filename)
+        return df.to_dict('records')
+
+class CloudSync:
+    def __init__(self, max_retries: int = 3):
+        self.max_retries = max_retries
+    
+    async def upload(self, data: dict, url: str):
+        """Upload data with retry logic"""
+        async with aiohttp.ClientSession() as session:
+            for attempt in range(self.max_retries):
+                try:
+                    async with session.post(url, json=data) as resp:
+                        if resp.status == 200:
+                            return True
+                except Exception as e:
+                    print(f"Upload attempt {attempt+1} failed: {str(e)}")
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+        return False
+
+# --------------------------
+# CLI & Dev Enhancements
+# --------------------------
+class CommandParser:
+    def __init__(self):
+        self.parser = argparse.ArgumentParser(description="WiFi Mapper CLI")
+        self._setup_parser()
+    
+    def _setup_parser(self):
+        """Configure argument parser"""
+        self.parser.add_argument('command', choices=['scan', 'config', 'visualize'])
+        self.parser.add_argument('--speed', type=float, default=1.0,
+                               help="Playback speed multiplier")
+        self.parser.add_argument('--low-power', action='store_true',
+                               help="Enable low power mode")
+    
+    def parse(self, cmd_str: str) -> dict:
+        """Parse command string"""
+        try:
+            args = self.parser.parse_args(cmd_str.split())
+            return vars(args)
+        except SystemExit:
+            return {"error": "Invalid command"}
+
+# --------------------------
+# Main Application
+# --------------------------
+class EnhancedWiFiMapper:
+    def __init__(self, container: Container):
+        self.container = container
+        self.scanner = container.wifi_scanner()
+        self.tunnel = container.tunnel()
+        
+        # Initialize all components
+        self.audit_logger = EncryptedAuditLogger(container.config.security.encryption_key)
+        self.tpm_manager = TPMManager()
+        self.ui_manager = UIManager()
+        self.websocket_manager = WebSocketManager()
+        self.command_protocol = CommandProtocol()
+        
+        # Start services
+        self.websocket_manager.start_server()
+
+    async def run(self):
+        """Main application loop"""
+        while True:
+            await self._scan_cycle()
+            await asyncio.sleep(1.0)
+    
+    async def _scan_cycle(self):
+        """Perform a single scan cycle"""
+        scan_data = self.scanner.scan()
+        processed = self._process_scan(scan_data)
+        self._update_visualization(processed)
+        await self._send_updates(processed)
+    
+    def _process_scan(self, data: dict) -> dict:
+        """Process raw scan data"""
+        # Existing processing logic
+        return data
+    
+    def _update_visualization(self, data: dict):
+        """Update UI with new data"""
+        self.ui_manager.add_device(
+            x=data['x'],
+            y=data['y'],
+            device_type=data['type'],
+            cluster=data.get('cluster', -1)
+        )
+    
+    async def _send_updates(self, data: dict):
+        """Send updates via WebSocket"""
+        if self.websocket_manager.socketio:
+            self.websocket_manager.socketio.emit('update', data)
+
+# Dependency Injection Setup
+def configure_container():
+    container = Container()
+    container.config.from_yaml('config.yaml')
+    return container
+
+# Application Entry Point
+if __name__ == "__main__":
+    # Setup dependency injection
+    container = configure_container()
+    
+    # Create and run application
+    app = EnhancedWiFiMapper(container)
+    
+    # Run with asyncio
+    asyncio.run(app.run())
