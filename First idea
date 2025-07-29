@@ -436,8 +436,9 @@ if __name__ == "__main__":
     # Setup dependency injection
     container = configure_container()
     
-    # Create and run application
+    # Create and run application 
     app = EnhancedWiFiMapper(container)
     
     # Run with asyncio
     asyncio.run(app.run())
+1
